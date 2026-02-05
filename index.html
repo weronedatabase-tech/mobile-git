@@ -28,7 +28,7 @@
         import { createRoot } from "https://esm.sh/react-dom@18.2.0/client";
         import { Octokit } from "https://esm.sh/@octokit/rest@20.0.1";
         
-        // 2. Import Icons directly as React Components (Fixes the icon error)
+        // 2. Import Icons directly as React Components
         import { 
             Folder, FileCode, ArrowLeft, Save, LogOut, 
             GitCommit, ChevronRight, Github, AlertCircle 
@@ -84,7 +84,6 @@
             }, [token]);
 
             // --- GITHUB API INSTANCE ---
-            // Re-create Octokit only when token changes
             const octokit = React.useMemo(() => new Octokit({ auth: token }), [token]);
 
             const login = () => {
