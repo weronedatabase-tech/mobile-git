@@ -77,9 +77,9 @@
             const [commitMsg, setCommitMsg] = useState("Update via MobileGit");
 
             // UI State
-            const [showCreateModal, setShowCreateModal] = useState(false);
-            const [newRepoName, setNewRepoName] = useState("");
-            const [repoMenu, setRepoMenu] = useState(null); // ID of repo with open menu
+            const [modalMode, setModalMode] = useState(null); // 'repo' or 'file'
+            const [inputName, setInputName] = useState("");
+            const [repoMenu, setRepoMenu] = useState(null);
 
             // Hide Loading UI
             useEffect(() => {
@@ -120,7 +120,6 @@
             // --- AUTH ---
             const login = () => {
                 const REDIRECT_URI = window.location.href.split('?')[0];
-                // UPDATED SCOPE: Added delete_repo
                 window.location.href = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=repo,delete_repo`;
             };
 
@@ -132,7 +131,7 @@
                 setError(null);
             };
 
-            // --- REPO ACTIONS ---
+            // --- ACTIONS ---
             const loadRepos = async () => {
                 if(!octokit) return;
                 setLoading(true);
@@ -150,41 +149,44 @@
 
             useEffect(() => { if(token) loadRepos(); }, [token, octokit]);
 
-            const createRepo = async () => {
-                if(!newRepoName) return;
-                setLoading(true);
-                try {
-                    await octokit.repos.createForAuthenticatedUser({
-                        name: newRepoName,
-                        auto_init: true // Creates README.md
-                    });
-                    setNewRepoName("");
-                    setShowCreateModal(false);
-                    await loadRepos(); // Refresh
-                } catch(e) {
-                    alert("Create failed: " + e.message);
+            const handleCreate = async () => {
+                if(!inputName) return;
+                
+                if (modalMode === 'repo') {
+                    // CREATE REPO
+                    setLoading(true);
+                    try {
+                        await octokit.repos.createForAuthenticatedUser({ name: inputName, auto_init: true });
+                        setInputName("");
+                        setModalMode(null);
+                        await loadRepos();
+                    } catch(e) { alert("Create failed: " + e.message); }
+                    setLoading(false);
+
+                } else if (modalMode === 'file') {
+                    // CREATE FILE (Setup Editor)
+                    // We don't verify duplication here, API handles it on save
+                    const fullPath = path ? `${path}/${inputName}` : inputName;
+                    setFileContent("");
+                    setFileSha(""); // Empty SHA = Create New
+                    setFilePath(fullPath);
+                    setCommitMsg(`Create ${inputName}`);
+                    setView("editor");
+                    setInputName("");
+                    setModalMode(null);
                 }
-                setLoading(false);
             };
 
             const deleteRepo = async (repo) => {
                 const confirmName = prompt(`DANGER: To delete '${repo.name}', type its name below:`);
-                if (confirmName !== repo.name) {
-                    alert("Name mismatch. Deletion cancelled.");
-                    return;
-                }
+                if (confirmName !== repo.name) return;
 
                 setLoading(true);
                 try {
-                    await octokit.repos.delete({
-                        owner: repo.owner.login,
-                        repo: repo.name
-                    });
+                    await octokit.repos.delete({ owner: repo.owner.login, repo: repo.name });
                     setRepoMenu(null);
-                    setRepos(repos.filter(r => r.id !== repo.id)); // Optimistic UI update
-                } catch(e) {
-                    alert("Delete failed. Check permissions (Logout/Login).");
-                }
+                    setRepos(repos.filter(r => r.id !== repo.id));
+                } catch(e) { alert("Delete failed. Check permissions."); }
                 setLoading(false);
             };
 
@@ -194,16 +196,13 @@
                     await octokit.repos.createPagesSite({
                         owner: repo.owner.login,
                         repo: repo.name,
-                        source: {
-                            branch: 'main',
-                            path: '/'
-                        }
+                        source: { branch: 'main', path: '/' }
                     });
-                    alert("GitHub Pages deployment triggered! It may take a minute to go live.");
+                    alert("Pages triggered! Wait 1-2 mins.");
                     setRepoMenu(null);
-                } catch(e) {
-                    if(e.status === 409) alert("Pages already enabled!");
-                    else alert("Failed to enable Pages: " + e.message);
+                } catch(e) { 
+                    if(e.status === 409) alert("Pages already enabled!"); 
+                    else alert("Failed: " + e.message); 
                 }
                 setLoading(false);
             };
@@ -257,16 +256,20 @@
                     for (let i = 0; i < bytes.byteLength; i++) binaryString += String.fromCharCode(bytes[i]);
                     const contentEncoded = btoa(binaryString);
 
-                    await octokit.repos.createOrUpdateFileContents({
+                    // API Payload
+                    const payload = {
                         owner: currentRepo.owner.login,
                         repo: currentRepo.name,
                         path: filePath,
                         message: commitMsg,
-                        content: contentEncoded,
-                        sha: fileSha
-                    });
+                        content: contentEncoded
+                    };
+                    // Only add SHA if we are updating existing file
+                    if (fileSha) payload.sha = fileSha;
+
+                    await octokit.repos.createOrUpdateFileContents(payload);
                     alert("Committed!");
-                    loadFiles(currentRepo, path);
+                    loadFiles(currentRepo, path); // Return to file list
                 } catch(e) { setError("Commit failed: " + e.message); }
                 setLoading(false);
             };
@@ -306,8 +309,12 @@
                             </h1>
                         </div>
                         <div className="flex items-center gap-2">
-                            {view === "repos" && (
-                                <button onClick={() => setShowCreateModal(true)} className="p-2 bg-blue-600 text-white rounded-full active:scale-90 transition">
+                            {/* Create Button: Different action based on View */}
+                            {(view === "repos" || view === "files") && (
+                                <button 
+                                    onClick={() => { setInputName(""); setModalMode(view === 'repos' ? 'repo' : 'file'); }} 
+                                    className="p-2 bg-blue-600 text-white rounded-full active:scale-90 transition"
+                                >
                                     <Icons.Plus />
                                 </button>
                             )}
@@ -323,21 +330,21 @@
                         </div>
                     )}
 
-                    {/* CREATE MODAL */}
-                    {showCreateModal && (
+                    {/* SHARED CREATE MODAL */}
+                    {modalMode && (
                         <div className="modal-bg">
                             <div className="bg-slate-800 p-6 rounded-xl w-11/12 max-w-sm border border-slate-700 shadow-2xl">
-                                <h3 className="text-xl font-bold mb-4">New Repository</h3>
+                                <h3 className="text-xl font-bold mb-4">{modalMode === 'repo' ? 'New Repository' : 'New File'}</h3>
                                 <input 
                                     autoFocus
-                                    placeholder="Repo Name" 
+                                    placeholder={modalMode === 'repo' ? "Repo Name" : "filename.txt"} 
                                     className="w-full bg-slate-900 border border-slate-600 rounded p-3 mb-4 text-white focus:border-blue-500 outline-none"
-                                    value={newRepoName}
-                                    onChange={e => setNewRepoName(e.target.value)}
+                                    value={inputName}
+                                    onChange={e => setInputName(e.target.value)}
                                 />
                                 <div className="flex gap-3">
-                                    <button onClick={() => setShowCreateModal(false)} className="flex-1 py-3 text-gray-400 font-bold bg-slate-700 rounded-lg">Cancel</button>
-                                    <button onClick={createRepo} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg">Create</button>
+                                    <button onClick={() => setModalMode(null)} className="flex-1 py-3 text-gray-400 font-bold bg-slate-700 rounded-lg">Cancel</button>
+                                    <button onClick={handleCreate} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-lg">Create</button>
                                 </div>
                             </div>
                         </div>
@@ -352,7 +359,6 @@
                             <div className="space-y-3">
                                 {repos.map(repo => (
                                     <div key={repo.id} className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden relative">
-                                        {/* Main Click Area */}
                                         <div onClick={() => loadFiles(repo)} className="p-4 flex justify-between items-center active:bg-slate-700 transition cursor-pointer pr-14">
                                             <div>
                                                 <h3 className="font-semibold text-blue-100">{repo.name}</h3>
@@ -363,16 +369,13 @@
                                                 </div>
                                             </div>
                                         </div>
-
-                                        {/* Settings Button */}
                                         <button 
                                             onClick={(e) => { e.stopPropagation(); setRepoMenu(repoMenu === repo.id ? null : repo.id); }}
                                             className="absolute right-0 top-0 bottom-0 w-12 flex items-center justify-center bg-slate-800 border-l border-slate-700 active:bg-slate-600"
                                         >
-                                            <Icons.Zap /> {/* Using Zap icon as generic 'Action' icon */}
+                                            <Icons.Zap />
                                         </button>
 
-                                        {/* EXPANDED MENU */}
                                         {repoMenu === repo.id && (
                                             <div className="bg-slate-900 border-t border-slate-700 p-2 grid grid-cols-3 gap-2 animate-in fade-in slide-in-from-top-2">
                                                 <button onClick={() => enablePages(repo)} className="flex flex-col items-center gap-1 p-2 bg-slate-800 rounded text-xs text-yellow-400 active:bg-slate-700">
@@ -400,7 +403,7 @@
                                         <span className="truncate text-sm flex-1">{file.name}</span>
                                     </div>
                                 ))}
-                                {files.length === 0 && <div className="text-center text-gray-500 mt-10">Empty Directory</div>}
+                                {files.length === 0 && <div className="text-center text-gray-500 mt-10">Empty Directory<br/><small>Click + to create file</small></div>}
                             </div>
                         )}
 
@@ -412,6 +415,7 @@
                                     value={fileContent}
                                     onChange={e => setFileContent(e.target.value)}
                                     spellCheck="false"
+                                    placeholder="Type your code here..."
                                 ></textarea>
                                 <div className="fixed bottom-0 left-0 w-full bg-slate-900 border-t border-slate-800 p-3 flex gap-2 items-center z-50">
                                     <input 
