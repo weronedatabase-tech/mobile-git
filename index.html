@@ -5,42 +5,59 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>MobileGit</title>
     
-    <!-- 1. Load Tailwind CSS (Styling) -->
+    <!-- ERROR HANDLER: This catches crashes and shows them on screen -->
+    <script>
+        window.onerror = function(msg, url, line, col, error) {
+            const div = document.getElementById('error-box');
+            if(div) {
+                div.style.display = 'block';
+                div.innerHTML += `<p><strong>Error:</strong> ${msg}<br><small>${url}:${line}</small></p>`;
+            }
+            return false;
+        };
+    </script>
+
+    <!-- 1. Styles -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: #f1f5f9; font-family: sans-serif; }
+        .loader { border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top: 3px solid #3b82f6; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #error-box { display: none; background: #ef4444; color: white; padding: 20px; margin: 20px; border-radius: 8px; font-family: monospace; word-break: break-all; }
+    </style>
     
-    <!-- 2. Load React & ReactDOM -->
+    <!-- 2. React Dependencies -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    
-    <!-- 3. Load Babel (To compile JSX in the browser) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <!-- 4. Load Icons (Lucide) -->
     <script src="https://unpkg.com/lucide@latest"></script>
-
-    <style>
-        body { background-color: #0f172a; color: #f1f5f9; }
-        .loader { border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top: 3px solid #3b82f6; width: 24px; height: 24px; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        textarea:focus, input:focus { outline: none; border-color: #3b82f6; }
-    </style>
 </head>
 <body>
+
+    <!-- Default Loading State (Visible before React starts) -->
+    <div id="loading-msg" class="text-center p-10 text-slate-500">
+        <div class="loader"></div>
+        <p>Initializing App...</p>
+        <button onclick="localStorage.clear(); window.location.reload()" class="mt-6 text-xs text-blue-400 underline">Reset App Data</button>
+    </div>
+
+    <div id="error-box"></div>
     <div id="root"></div>
 
-    <!-- 5. The Application Logic -->
+    <!-- 3. The Application -->
     <script type="text/babel" data-type="module">
-        import { Octokit } from "https://esm.sh/@octokit/rest";
+        // Import pinned version for stability
+        import { Octokit } from "https://esm.sh/@octokit/rest@20.0.1";
 
-        // --- CONFIGURATION (UPDATE THESE 2 LINES) ---
-        const GITHUB_CLIENT_ID = "Ov23liwbmxvn9qmImYMZ"; 
-        const GAS_PROXY_URL = "https://script.google.com/macros/s/AKfycbw83udtxsHNQ2bnJLikBePT6QM3-hkNWf-8Rci7QhXPYQAasSLEo_snW0n1uK6SQDaY/exec"; 
+        // --- CONFIGURATION ---
+        const GITHUB_CLIENT_ID = "YOUR_CLIENT_ID_HERE"; 
+        const GAS_PROXY_URL = "YOUR_GOOGLE_APPS_SCRIPT_URL_HERE"; 
         
         const { useState, useEffect } = React;
-        const REDIRECT_URI = window.location.href.split('?')[0]; // Current URL without params
+        const REDIRECT_URI = window.location.href.split('?')[0];
 
         function App() {
-            // Icons
+            // Icons definition
             const Icons = {
                 Folder: () => <i data-lucide="folder" className="w-5 h-5 text-blue-400"></i>,
                 File: () => <i data-lucide="file-code" className="w-5 h-5 text-green-400"></i>,
@@ -51,31 +68,29 @@
             };
 
             const [token, setToken] = useState(localStorage.getItem("gh_token"));
-            const [view, setView] = useState("repos"); // repos, files, editor
+            const [view, setView] = useState("repos");
             const [loading, setLoading] = useState(false);
-            
-            // Data
             const [repos, setRepos] = useState([]);
             const [files, setFiles] = useState([]);
             const [currentRepo, setCurrentRepo] = useState(null);
             const [path, setPath] = useState("");
-            
-            // Editor
             const [fileContent, setFileContent] = useState("");
             const [fileSha, setFileSha] = useState("");
             const [filePath, setFilePath] = useState("");
             const [commitMsg, setCommitMsg] = useState("Update via MobileGit");
 
-            // Initialize Lucide Icons after render
-            useEffect(() => { if(window.lucide) window.lucide.createIcons(); });
+            // Init Icons
+            useEffect(() => { 
+                if(window.lucide) window.lucide.createIcons(); 
+            });
 
-            // Auth Handler
+            // Auth Login Handler
             useEffect(() => {
                 const urlParams = new URLSearchParams(window.location.search);
                 const code = urlParams.get("code");
                 if (code && !token) {
                     setLoading(true);
-                    window.history.replaceState({}, document.title, REDIRECT_URI); // Clean URL
+                    window.history.replaceState({}, document.title, REDIRECT_URI);
                     
                     fetch(`${GAS_PROXY_URL}?code=${code}`)
                         .then(res => res.json())
@@ -84,16 +99,16 @@
                                 localStorage.setItem("gh_token", data.access_token);
                                 setToken(data.access_token);
                             } else {
-                                alert("Login failed: " + JSON.stringify(data));
+                                throw new Error(JSON.stringify(data));
                             }
                         })
+                        .catch(err => alert("Login Error: " + err.message))
                         .finally(() => setLoading(false));
                 }
             }, [token]);
 
             const octokit = new Octokit({ auth: token });
 
-            // Actions
             const login = () => {
                 window.location.href = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=repo`;
             };
@@ -102,6 +117,7 @@
                 localStorage.removeItem("gh_token");
                 setToken(null);
                 setRepos([]);
+                setView("repos");
             };
 
             const loadRepos = async () => {
@@ -110,11 +126,16 @@
                     const res = await octokit.repos.listForAuthenticatedUser({ sort: "updated", per_page: 30 });
                     setRepos(res.data);
                     setView("repos");
-                } catch(e) { console.error(e); }
+                } catch(e) { 
+                    console.error(e);
+                    // If 401 Unauthorized, token is bad
+                    if (e.status === 401) logout();
+                    else alert("Error loading repos: " + e.message);
+                }
                 setLoading(false);
             };
 
-            // Initial Load
+            // Load repos on start
             useEffect(() => { if(token) loadRepos(); }, [token]);
 
             const loadFiles = async (repo, dir = "") => {
@@ -127,7 +148,7 @@
                     setCurrentRepo(repo);
                     setPath(dir);
                     setView("files");
-                } catch(e) { alert("Could not load folder"); }
+                } catch(e) { alert("Error loading folder: " + e.message); }
                 setLoading(false);
             };
 
@@ -135,22 +156,20 @@
                 setLoading(true);
                 try {
                     const res = await octokit.repos.getContent({ owner: currentRepo.owner.login, repo: currentRepo.name, path: file.path });
-                    // Decode Unicode
+                    // Decode Unicode safely
                     const content = new TextDecoder().decode(Uint8Array.from(atob(res.data.content.replace(/\n/g, "")), c => c.charCodeAt(0)));
                     setFileContent(content);
                     setFileSha(res.data.sha);
                     setFilePath(file.path);
                     setView("editor");
-                } catch(e) { alert("Cannot open file (Binary or too large)"); }
+                } catch(e) { alert("Cannot open file (Binary/Large)"); }
                 setLoading(false);
             };
 
             const saveFile = async () => {
                 setLoading(true);
                 try {
-                    // Encode Unicode
                     const contentEncoded = btoa(new TextEncoder().encode(fileContent).reduce((data, byte) => data + String.fromCharCode(byte), ''));
-                    
                     await octokit.repos.createOrUpdateFileContents({
                         owner: currentRepo.owner.login,
                         repo: currentRepo.name,
@@ -199,25 +218,23 @@
                         <button onClick={logout} className="text-gray-400 p-2"><Icons.Logout /></button>
                     </div>
 
-                    {/* Main Content */}
+                    {/* Content */}
                     <div className="p-4">
                         {loading && <div className="flex justify-center py-8"><div className="loader"></div></div>}
 
-                        {/* REPOS */}
                         {!loading && view === "repos" && (
                             <div className="space-y-3">
                                 {repos.map(repo => (
                                     <div key={repo.id} onClick={() => loadFiles(repo)} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex justify-between items-center active:bg-slate-700 transition cursor-pointer">
                                         <div>
                                             <h3 className="font-semibold text-blue-100">{repo.name}</h3>
-                                            <p className="text-xs text-gray-400 mt-1">{repo.private ? "Private" : "Public"} • {repo.language}</p>
+                                            <p className="text-xs text-gray-400 mt-1">{repo.private ? "🔒" : "Public"} • {repo.language}</p>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         )}
 
-                        {/* FILES */}
                         {!loading && view === "files" && (
                             <div className="space-y-2">
                                 {files.map(file => (
@@ -230,7 +247,6 @@
                             </div>
                         )}
 
-                        {/* EDITOR */}
                         {!loading && view === "editor" && (
                             <div className="flex flex-col h-[75vh]">
                                 <textarea 
@@ -256,8 +272,14 @@
             );
         }
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        // Safe Rendering
+        const rootEl = document.getElementById('root');
+        if(rootEl) {
+            const root = ReactDOM.createRoot(rootEl);
+            root.render(<App />);
+            // Hide the initial loading msg once React mounts
+            document.getElementById('loading-msg').style.display = 'none';
+        }
     </script>
 </body>
 </html>
