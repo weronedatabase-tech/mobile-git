@@ -25,7 +25,9 @@
         }
     </script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); min-height: 100vh; }
+        /* Lock body to viewport height to prevent bounce and ensure full height editor */
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); height: 100vh; overflow: hidden; }
+        
         .loader { border: 3px solid rgba(128,128,128,0.3); border-radius: 50%; border-top: 3px solid #3b82f6; width: 24px; height: 24px; animation: spin 1s linear infinite; margin: 20px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         textarea, input, select { font-size: 14px !important; }
@@ -49,7 +51,7 @@
     </div>
 
     <div id="error-box"></div>
-    <div id="root"></div>
+    <div id="root" class="h-full"></div>
     <div id="toast" class="toast">Message</div>
 
     <script type="text/babel" data-type="module">
@@ -61,7 +63,6 @@
         const GAS_PROXY_URL = "https://script.google.com/macros/s/AKfycbw83udtxsHNQ2bnJLikBePT6QM3-hkNWf-8Rci7QhXPYQAasSLEo_snW0n1uK6SQDaY/exec";
         const GOOGLE_CLIENT_ID = "91778409538-4i31u5ia07ibb4o1ctv5c1sr7jpv3k1k.apps.googleusercontent.com"; 
         
-        // Updated Scopes: 'drive' is required for full deletion and listing bound scripts reliably
         const GOOGLE_SCOPES = "https://www.googleapis.com/auth/script.projects https://www.googleapis.com/auth/script.deployments https://www.googleapis.com/auth/drive";
 
         // --- ICONS ---
@@ -90,7 +91,6 @@
             useEffect(() => { document.documentElement.classList.toggle('dark', theme === 'dark'); localStorage.setItem("theme", theme); }, [theme]);
             const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
 
-            // --- STATE ---
             const [service, setService] = useState(localStorage.getItem("service") || "git");
             const [ghToken, setGhToken] = useState(localStorage.getItem("gh_token"));
             const [gasToken, setGasToken] = useState(localStorage.getItem("gas_token"));
@@ -115,7 +115,6 @@
             const [showGlobalMenu, setShowGlobalMenu] = useState(false);
             const [manualPasteText, setManualPasteText] = useState("");
 
-            // GAS Config
             const [gasAccess, setGasAccess] = useState("ANYONE_ANONYMOUS");
             const [gasExecute, setGasExecute] = useState("USER_DEPLOYING");
 
@@ -154,7 +153,6 @@
                 setRepos([]); setView("repos"); setShowGlobalMenu(false);
             };
 
-            // --- API CLIENTS ---
             const octokit = useMemo(() => ghToken ? new Octokit({ auth: ghToken }) : null, [ghToken]);
             
             const gasFetch = async (url, method = "GET", body = null) => {
@@ -171,7 +169,7 @@
                 return res.json();
             };
 
-            // --- LOAD DATA ---
+            // --- DATA LOADING ---
             const loadData = async () => {
                 setLoading(true); setError(null);
                 try {
@@ -179,7 +177,7 @@
                         const res = await octokit.repos.listForAuthenticatedUser({ sort: "updated", per_page: 30 });
                         setRepos(res.data);
                     } else if (service === 'gas' && gasToken) {
-                        // Use Drive API to list ALL scripts (including bound ones)
+                        // Use Drive API to list ALL scripts
                         const res = await gasFetch("https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.script' and trashed=false&fields=files(id, name, modifiedTime)&orderBy=modifiedTime desc&pageSize=50");
                         const projects = (res.files || []).map(f => ({ ...f, scriptId: f.id, updated_at: f.modifiedTime }));
                         setRepos(projects);
@@ -230,7 +228,6 @@
                 setLoading(false);
             };
 
-            // --- SAVE / DELETE / RENAME LOGIC ---
             const saveFile = async () => {
                 setLoading(true);
                 try {
@@ -239,26 +236,23 @@
                         const payload = { owner: currentRepo.owner.login, repo: currentRepo.name, path: filePath, message: commitMsg, content: contentEncoded };
                         if (fileSha) payload.sha = fileSha;
                         await octokit.repos.createOrUpdateFileContents(payload);
-                        loadFiles(currentRepo);
                     } else {
                         const res = await gasFetch(`https://script.googleapis.com/v1/projects/${currentRepo.scriptId}/content`);
-                        let newFiles = res.files || [];
-                        const targetName = filePath.replace(/\.(gs|html)$/, "");
-                        
-                        const exists = newFiles.find(f => f.name === targetName);
-                        if(exists) {
-                            newFiles = newFiles.map(f => f.name === targetName ? { ...f, source: fileContent } : f);
-                        } else {
+                        const newFiles = res.files.map(f => {
+                            const fname = f.name + (f.type==='HTML'?'.html':'.gs');
+                            return fname === filePath ? { ...f, source: fileContent } : f;
+                        });
+                        if(!res.files.find(f => (f.name + (f.type==='HTML'?'.html':'.gs')) === filePath)) {
+                            const name = filePath.replace(/\.(gs|html)$/, "");
                             const type = filePath.endsWith(".html") ? "HTML" : "SERVER_JS";
-                            newFiles.push({ name: targetName, type, source: fileContent });
+                            newFiles.push({ name, type, source: fileContent });
                         }
-                        
                         await gasFetch(`https://script.googleapis.com/v1/projects/${currentRepo.scriptId}/content`, "PUT", { files: newFiles });
-                        
                         const mapped = newFiles.map(f => ({ name: f.name + (f.type==='HTML'?'.html':'.gs'), type: 'file', sha: f.name, rawType: f.type, source: f.source }));
                         setFiles(mapped);
                     }
                     toast("Saved!");
+                    if(service === 'git') loadFiles(currentRepo); 
                 } catch(e) { setError("Save failed: " + e.message); }
                 setLoading(false);
             };
@@ -299,12 +293,10 @@
                 setLoading(false);
             };
 
-            // --- DEPLOYMENTS ---
             const handleDeployGas = async () => {
                 setLoading(true);
                 try {
                     const ver = await gasFetch(`https://script.googleapis.com/v1/projects/${currentRepo.scriptId}/versions`, "POST", { description: deployDesc });
-                    
                     const existing = await gasFetch(`https://script.googleapis.com/v1/projects/${currentRepo.scriptId}/deployments`);
                     const webApp = existing.deployments?.find(d => d.deploymentConfig?.scriptId); 
                     
@@ -341,13 +333,11 @@
                 setLoading(false);
             };
 
-            // --- ACTIONS ---
             const handleCreate = async () => {
                 if(!inputName) return;
                 
-                // UX FIX: Dismiss first, then load
                 if (modalMode === 'createRepo') { 
-                    setModalMode(null); 
+                    setModalMode(null); // Immediate dismiss
                     setLoading(true);
                     try {
                         if(service === 'git') {
@@ -378,7 +368,6 @@
                         if(service === 'git') {
                             await octokit.repos.delete({ owner: repo.owner.login, repo: repo.name }); 
                         } else {
-                            // GAS DELETE via Drive API
                             await gasFetch(`https://www.googleapis.com/drive/v3/files/${repo.scriptId}`, "DELETE");
                         }
                         setRepos(repos.filter(r => (r.id || r.scriptId) !== (repo.id || repo.scriptId)));
@@ -386,14 +375,13 @@
                     } catch(e) { alert("Delete failed: " + e.message); }
                     setLoading(false);
                 } else if (action === 'pages') {
-                    // ... (Git Pages logic)
+                    // Git Pages Logic (Keep existing)
                 } else if (action === 'launch') {
                     if(service === 'git') window.open(`https://${repo.owner.login}.github.io/${repo.name}/`, '_blank');
                     else window.open(`https://script.google.com/d/${repo.scriptId}/edit`, '_blank');
                 }
             };
 
-            // --- CLIPBOARD ---
             const handlePaste = async () => {
                 try {
                     const text = await navigator.clipboard.readText();
@@ -408,7 +396,6 @@
                 setModalMode(null);
             }
 
-            // --- RENDER ---
             const isLoggedIn = (service === 'git' && ghToken) || (service === 'gas' && gasToken);
 
             if (!isLoggedIn) {
@@ -428,7 +415,7 @@
             }
 
             return (
-                <div className="pb-20 max-w-2xl mx-auto min-h-screen flex flex-col relative text-slate-900 dark:text-gray-100" onClick={() => setShowGlobalMenu(false)}>
+                <div className="max-w-2xl mx-auto h-[100dvh] flex flex-col relative text-slate-900 dark:text-gray-100" onClick={() => setShowGlobalMenu(false)}>
                     <div className="sticky top-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur border-b border-gray-200 dark:border-slate-800 p-3 flex items-center justify-between z-50">
                         <div className="flex items-center gap-2 overflow-hidden">
                             {view !== "repos" && <button onClick={() => view === 'editor' ? setView('files') : loadData()} className="p-1.5 bg-gray-100 dark:bg-slate-800 rounded-full"><Icons.Back /></button>}
@@ -508,11 +495,11 @@
                         </div>
                     )}
 
-                    <div className="p-2 flex-1 relative">
+                    <div className="p-2 flex-1 relative overflow-hidden">
                         {loading && <div className="absolute inset-0 bg-white/50 dark:bg-slate-900/50 z-10 flex pt-20 justify-center"><div className="loader"></div></div>}
 
                         {!loading && view === "repos" && (
-                            <div className="space-y-2">
+                            <div className="h-full overflow-y-auto space-y-2 pb-20">
                                 {repos.length === 0 && <div className="text-center text-gray-400 mt-10">Empty</div>}
                                 {repos.map(r => (
                                     <div key={r.id || r.scriptId} className="bg-white dark:bg-slate-800 rounded-lg border border-gray-200 dark:border-slate-700 overflow-hidden shadow-sm">
@@ -525,7 +512,7 @@
                                         <div className="flex divide-x divide-gray-200 dark:divide-slate-700 bg-gray-50 dark:bg-slate-800/50">
                                             {service === 'git' ? (
                                                 <>
-                                                    <button onClick={(e) => { e.stopPropagation(); alert("Pages"); }} className="flex-1 p-2 flex justify-center text-yellow-500"><Icons.Zap /></button>
+                                                    <button onClick={(e) => { e.stopPropagation(); enablePages(r); }} className="flex-1 p-2 flex justify-center text-yellow-500"><Icons.Zap /></button>
                                                     <button onClick={(e) => { e.stopPropagation(); window.open(`https://${r.owner.login}.github.io/${r.name}/`); }} className="flex-1 p-2 flex justify-center text-blue-500"><Icons.Globe /></button>
                                                     <button onClick={(e) => repoAction('delete', r, e)} className="flex-1 p-2 flex justify-center text-red-500"><Icons.Trash /></button>
                                                 </>
@@ -544,7 +531,7 @@
                         )}
 
                         {!loading && view === "files" && (
-                            <div className="flex flex-col gap-1">
+                            <div className="h-full overflow-y-auto flex flex-col gap-1 pb-20">
                                 {files.map(f => (
                                     <div key={f.sha || f.name} className="flex items-center gap-2 p-2.5 bg-white dark:bg-slate-800 rounded border border-gray-200 dark:border-slate-700 shadow-sm">
                                         <div className="flex-1 flex items-center gap-2 cursor-pointer" onClick={() => f.type === "dir" ? alert("Dir") : openFile(f)}>
@@ -558,8 +545,8 @@
                         )}
 
                         {!loading && view === "editor" && (
-                            <div className="flex flex-col h-full">
-                                <textarea className="flex-1 bg-gray-50 dark:bg-slate-900 text-slate-900 dark:text-gray-200 p-2 rounded-lg font-mono border border-gray-300 dark:border-slate-700 resize-none outline-none mb-14" value={fileContent} onChange={e => setFileContent(e.target.value)} spellCheck="false"></textarea>
+                            <div className="flex flex-col h-full relative">
+                                <textarea className="flex-1 w-full bg-gray-50 dark:bg-slate-900 text-slate-900 dark:text-gray-200 p-3 rounded-lg font-mono border border-gray-300 dark:border-slate-700 resize-none outline-none mb-14" value={fileContent} onChange={e => setFileContent(e.target.value)} spellCheck="false"></textarea>
                                 <div className="fixed bottom-0 left-0 w-full bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-800 p-2 flex gap-2 items-center z-50">
                                     <button onClick={handlePaste} className="p-2"><Icons.Paste /></button>
                                     <button onClick={() => {navigator.clipboard.writeText(fileContent); toast("Copied");}} className="p-2"><Icons.Copy /></button>
