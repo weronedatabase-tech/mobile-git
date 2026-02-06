@@ -34,7 +34,6 @@
 
     <style>
         body { 
-            /* Base styles handles by Tailwind classes on body tag now */
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
             -webkit-tap-highlight-color: transparent; 
             padding-top: env(safe-area-inset-top);
@@ -141,7 +140,6 @@
             // UI State
             const [modalMode, setModalMode] = useState(null); 
             const [inputName, setInputName] = useState("");
-            const [repoMenu, setRepoMenu] = useState(null);
             const [showGlobalMenu, setShowGlobalMenu] = useState(false);
 
             // Hide Loading UI
@@ -299,20 +297,21 @@
                 }
             };
 
-            const deleteRepo = async (repo) => {
+            const deleteRepo = async (repo, e) => {
+                e.stopPropagation();
                 const confirmName = prompt(`DANGER: To delete '${repo.name}', type its name below:`);
                 if (confirmName !== repo.name) return;
 
                 setLoading(true);
                 try {
                     await octokit.repos.delete({ owner: repo.owner.login, repo: repo.name });
-                    setRepoMenu(null);
                     setRepos(repos.filter(r => r.id !== repo.id));
                 } catch(e) { alert("Delete failed. Check permissions."); }
                 setLoading(false);
             };
 
-            const enablePages = async (repo) => {
+            const enablePages = async (repo, e) => {
+                e.stopPropagation();
                 setLoading(true);
                 try {
                     await octokit.repos.createPagesSite({
@@ -321,7 +320,6 @@
                         source: { branch: 'main', path: '/' }
                     });
                     alert("Pages triggered! Wait 1-2 mins.");
-                    setRepoMenu(null);
                 } catch(e) { 
                     if(e.status === 409) alert("Pages already enabled!"); 
                     else alert("Failed: " + e.message); 
@@ -329,7 +327,8 @@
                 setLoading(false);
             };
 
-            const launchSite = (repo) => {
+            const launchSite = (repo, e) => {
+                e.stopPropagation();
                 const url = `https://${repo.owner.login}.github.io/${repo.name}/`;
                 window.open(url, '_blank');
             };
@@ -416,6 +415,9 @@
                                     <Icons.Plus />
                                 </button>
                             )}
+                             <button onClick={toggleTheme} className="p-2 bg-gray-100 dark:bg-slate-800 rounded-full hover:bg-gray-200 dark:hover:bg-slate-700 transition">
+                                <span className="text-xl">🌗</span>
+                            </button>
                             <button onClick={(e) => { e.stopPropagation(); setShowGlobalMenu(!showGlobalMenu); }} className="text-gray-500 dark:text-gray-400 p-2 hover:text-slate-900 dark:hover:text-white relative">
                                 <Icons.Menu />
                             </button>
@@ -425,10 +427,6 @@
                     {/* GLOBAL MENU */}
                     {showGlobalMenu && (
                         <div className="menu-dropdown bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl shadow-2xl p-2 flex flex-col gap-1 animate-in fade-in slide-in-from-top-2">
-                             <button onClick={toggleTheme} className="flex items-center gap-3 p-3 rounded hover:bg-gray-100 dark:hover:bg-slate-700 text-left">
-                                <span className="text-xl">🌗</span>
-                                <span className="text-sm text-slate-700 dark:text-gray-200">Toggle Theme</span>
-                            </button>
                             <button onClick={handleRefreshData} className="flex items-center gap-3 p-3 rounded hover:bg-gray-100 dark:hover:bg-slate-700 text-left">
                                 <span className="text-blue-500 dark:text-blue-400"><Icons.Refresh /></span>
                                 <span className="text-sm text-slate-700 dark:text-gray-200">Refresh Data</span>
@@ -481,39 +479,34 @@
 
                         {/* REPOS VIEW */}
                         {!loading && view === "repos" && (
-                            <div className="space-y-3">
+                            <div className="space-y-4">
                                 {repos.map(repo => (
-                                    <div key={repo.id} className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 overflow-hidden relative shadow-sm hover:border-gray-300 dark:hover:border-slate-600 transition-colors">
-                                        <div onClick={() => loadFiles(repo)} className="p-4 flex justify-between items-center active:bg-gray-50 dark:active:bg-slate-700 transition cursor-pointer pr-14">
-                                            <div>
-                                                <h3 className="font-semibold text-blue-600 dark:text-blue-100">{repo.name}</h3>
-                                                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                                    <span>{repo.private ? <Icons.Private /> : "Public"}</span>
-                                                    <span>•</span>
-                                                    <span>{repo.language || "Text"}</span>
-                                                </div>
+                                    <div key={repo.id} className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 overflow-hidden shadow-sm flex flex-col">
+                                        {/* Click to Open Repo */}
+                                        <div onClick={() => loadFiles(repo)} className="p-4 border-b border-gray-100 dark:border-slate-700 active:bg-gray-50 dark:active:bg-slate-700 transition cursor-pointer">
+                                            <h3 className="font-semibold text-lg text-blue-600 dark:text-blue-100">{repo.name}</h3>
+                                            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                <span>{repo.private ? "🔒 Private" : "Public"}</span>
+                                                <span>•</span>
+                                                <span>{repo.language || "Text"}</span>
                                             </div>
                                         </div>
-                                        <button 
-                                            onClick={(e) => { e.stopPropagation(); setRepoMenu(repoMenu === repo.id ? null : repo.id); }}
-                                            className="absolute right-0 top-0 bottom-0 w-12 flex items-center justify-center bg-gray-50 dark:bg-slate-800 border-l border-gray-200 dark:border-slate-700 active:bg-gray-200 dark:active:bg-slate-600"
-                                        >
-                                            <span className="text-gray-500 dark:text-gray-300"><Icons.Zap /></span>
-                                        </button>
 
-                                        {repoMenu === repo.id && (
-                                            <div className="bg-gray-50 dark:bg-slate-900 border-t border-gray-200 dark:border-slate-700 p-2 grid grid-cols-3 gap-2 animate-in fade-in slide-in-from-top-2">
-                                                <button onClick={() => enablePages(repo)} className="flex flex-col items-center gap-1 p-2 bg-white dark:bg-slate-800 rounded text-xs text-yellow-600 dark:text-yellow-400 active:bg-gray-100 dark:active:bg-slate-700 border border-gray-200 dark:border-slate-700">
-                                                    <Icons.Zap /> Enable Pages
-                                                </button>
-                                                <button onClick={() => launchSite(repo)} className="flex flex-col items-center gap-1 p-2 bg-white dark:bg-slate-800 rounded text-xs text-blue-500 dark:text-blue-400 active:bg-gray-100 dark:active:bg-slate-700 border border-gray-200 dark:border-slate-700">
-                                                    <Icons.Globe /> Launch Site
-                                                </button>
-                                                <button onClick={() => deleteRepo(repo)} className="flex flex-col items-center gap-1 p-2 bg-white dark:bg-slate-800 rounded text-xs text-red-500 dark:text-red-400 active:bg-gray-100 dark:active:bg-slate-700 border border-gray-200 dark:border-slate-700">
-                                                    <Icons.Trash /> Delete Repo
-                                                </button>
-                                            </div>
-                                        )}
+                                        {/* Action Bar */}
+                                        <div className="flex divide-x divide-gray-200 dark:divide-slate-700 bg-gray-50 dark:bg-slate-800/50">
+                                            <button onClick={(e) => enablePages(repo, e)} className="flex-1 p-3 flex justify-center items-center text-yellow-600 dark:text-yellow-400 active:bg-gray-200 dark:active:bg-slate-700">
+                                                <span className="sr-only">Pages</span>
+                                                <Icons.Zap />
+                                            </button>
+                                            <button onClick={(e) => launchSite(repo, e)} className="flex-1 p-3 flex justify-center items-center text-blue-500 dark:text-blue-400 active:bg-gray-200 dark:active:bg-slate-700">
+                                                <span className="sr-only">Launch</span>
+                                                <Icons.Globe />
+                                            </button>
+                                            <button onClick={(e) => deleteRepo(repo, e)} className="flex-1 p-3 flex justify-center items-center text-red-500 dark:text-red-400 active:bg-gray-200 dark:active:bg-slate-700">
+                                                <span className="sr-only">Delete</span>
+                                                <Icons.Trash />
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
