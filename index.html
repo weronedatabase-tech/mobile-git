@@ -178,7 +178,6 @@
                         const res = await octokit.repos.listForAuthenticatedUser({ sort: "updated", per_page: 30 });
                         setRepos(res.data);
                     } else if (service === 'gas' && gasToken) {
-                        // FIX: Added includeItemsFromAllDrives and supportsAllDrives to find linked/bound scripts
                         const res = await gasFetch("https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.script' and trashed=false&fields=files(id, name, modifiedTime)&orderBy=modifiedTime desc&pageSize=100&includeItemsFromAllDrives=true&supportsAllDrives=true");
                         const projects = (res.files || []).map(f => ({ ...f, scriptId: f.id, updated_at: f.modifiedTime }));
                         setRepos(projects);
@@ -299,16 +298,26 @@
             const handleDeployGas = async () => {
                 setLoading(true);
                 try {
+                    // 1. Create a new version of the script
                     const ver = await gasFetch(`https://script.googleapis.com/v1/projects/${currentRepo.scriptId}/versions`, "POST", { description: deployDesc });
-                    const existing = await gasFetch(`https://script.googleapis.com/v1/projects/${currentRepo.scriptId}/deployments`);
-                    const webApp = existing.deployments?.find(d => d.deploymentConfig?.scriptId); 
                     
-                    if(webApp) {
-                        await gasFetch(`https://script.googleapis.com/v1/projects/${currentRepo.scriptId}/deployments/${webApp.deploymentId}`, "PUT", {
+                    // 2. Fetch all deployments
+                    const existing = await gasFetch(`https://script.googleapis.com/v1/projects/${currentRepo.scriptId}/deployments`);
+                    
+                    // 3. Find the CORRECT deployment to update
+                    //    - Must be a Web App
+                    //    - Sort by updateTime desc to avoid grabbing old/archived read-only deployments
+                    const webAppDeployments = existing.deployments?.filter(d => d.entryPoints?.some(e => e.webApp));
+                    const latestWebApp = webAppDeployments?.sort((a,b) => new Date(b.updateTime) - new Date(a.updateTime))[0];
+
+                    if(latestWebApp) {
+                        // Update the existing active deployment to point to the new version
+                        await gasFetch(`https://script.googleapis.com/v1/projects/${currentRepo.scriptId}/deployments/${latestWebApp.deploymentId}`, "PUT", {
                             deploymentConfig: { versionNumber: ver.versionNumber, description: deployDesc, manifestFileName: "appsscript" }
                         });
                         alert(`Updated Deployment to v${ver.versionNumber}`);
                     } else {
+                        // If no Web App exists, create a new one
                         await gasFetch(`https://script.googleapis.com/v1/projects/${currentRepo.scriptId}/deployments`, "POST", {
                             versionNumber: ver.versionNumber,
                             description: deployDesc,
