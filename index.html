@@ -177,7 +177,13 @@
                         const res = await octokit.repos.listForAuthenticatedUser({ sort: "updated", per_page: 30 });
                         setRepos(res.data);
                     } else if (service === 'gas' && gasToken) {
-                        const res = await gasFetch("https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.script' and trashed=false&fields=files(id, name, modifiedTime)&orderBy=modifiedTime desc&pageSize=100&includeItemsFromAllDrives=true&supportsAllDrives=true");
+                        // FIXED: Properly encode URL parameters for Drive API to avoid errors
+                        const q = encodeURIComponent("mimeType='application/vnd.google-apps.script' and trashed=false");
+                        const fields = "files(id, name, modifiedTime)";
+                        const orderBy = encodeURIComponent("modifiedTime desc");
+                        const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=${fields}&orderBy=${orderBy}&pageSize=100&includeItemsFromAllDrives=true&supportsAllDrives=true`;
+                        
+                        const res = await gasFetch(url);
                         const projects = (res.files || []).map(f => ({ ...f, scriptId: f.id, updated_at: f.modifiedTime }));
                         setRepos(projects);
                     }
@@ -553,7 +559,10 @@
 
                         {!loading && view === "repos" && (
                             <div className="h-full overflow-y-auto space-y-2 pb-20">
-                                {repos.length === 0 && <div className="text-center text-gray-400 mt-10">Empty</div>}
+                                {/* FIXED: Display Error Message if GAS load fails */}
+                                {error && <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-lg text-sm mb-2 border border-red-200 dark:border-red-800">{error}</div>}
+                                
+                                {repos.length === 0 && !error && <div className="text-center text-gray-400 mt-10">Empty</div>}
                                 {repos.map(r => (
                                     <div key={r.id || r.scriptId} className="bg-white dark:bg-slate-800 rounded-lg border border-gray-200 dark:border-slate-700 overflow-hidden shadow-sm">
                                         <div onClick={() => loadFiles(r)} className="p-3 active:bg-gray-50 dark:active:bg-slate-700 cursor-pointer">
